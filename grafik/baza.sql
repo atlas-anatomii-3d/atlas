@@ -106,3 +106,50 @@ grant execute on function public.admin_resetuj_haslo(smallint, text) to authenti
 
 insert into public.miesiace (miesiac)
 select generate_series('2027-01-01'::date, '2027-12-01'::date, interval '1 month')::date;
+
+-- ===== Synchronizacja z Arkuszem Google (Apps Script: apps-script.gs) =====
+-- Token przechowywany jako skrót SHA-256 w schemacie niedostępnym przez API.
+create schema if not exists prywatne;
+revoke all on schema prywatne from public, anon, authenticated;
+create table prywatne.sync_token (id int primary key default 1 check (id = 1), hash text not null);
+-- insert into prywatne.sync_token (hash) values (encode(extensions.digest('<TOKEN>', 'sha256'), 'hex'));
+
+create or replace function prywatne.sprawdz_token(p_token text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if p_token is null or not exists (select 1 from prywatne.sync_token
+     where hash = encode(extensions.digest(p_token, 'sha256'), 'hex')) then
+    raise exception 'Nieprawidłowy token synchronizacji';
+  end if;
+end $$;
+
+create or replace function public.sync_prosby(p_token text)
+returns table (nazwisko text, dzien date, wartosc text, komentarz text, updated_at timestamptz)
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform prywatne.sprawdz_token(p_token);
+  return query select p.nazwisko, r.dzien, r.wartosc, r.komentarz, r.updated_at
+    from public.prosby r join public.pracownicy p on p.id = r.pracownik_id
+    order by r.dzien, p.nazwisko;
+end $$;
+
+create or replace function public.sync_grafik(p_token text, p_od date, p_do date, p_wiersze jsonb)
+returns int language plpgsql security definer set search_path = '' as $$
+declare n int;
+begin
+  perform prywatne.sprawdz_token(p_token);
+  if p_do < p_od or p_do - p_od > 31 then raise exception 'Zły zakres dat'; end if;
+  delete from public.grafik where dzien between p_od and p_do;
+  insert into public.grafik (pracownik_id, dzien, wartosc)
+  select p.id, (w->>'d')::date, w->>'v'
+  from jsonb_array_elements(p_wiersze) w
+  join public.pracownicy p on lower(trim(p.nazwisko)) = lower(trim(w->>'n'))
+  where (w->>'d')::date between p_od and p_do
+    and w->>'v' in ('Dzień','Noc','Wolne','Urlop','Opieka','K')
+  on conflict do nothing;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+revoke execute on function public.sync_prosby(text), public.sync_grafik(text, date, date, jsonb) from public;
+grant execute on function public.sync_prosby(text), public.sync_grafik(text, date, date, jsonb) to anon, authenticated;

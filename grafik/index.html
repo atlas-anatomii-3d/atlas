@@ -75,7 +75,8 @@ table.g thead th{position:sticky;top:0;background:var(--card);z-index:2;padding:
 table.g th.name,table.g td.name{position:sticky;left:0;background:var(--card);z-index:1;text-align:left;padding:0 8px;min-width:150px;white-space:nowrap}
 table.g thead th.name{z-index:3}
 table.g th.we,table.g td.we{background:var(--wkend)} table.g th.hol,table.g td.hol{background:var(--hol)}
-table.g td.c{cursor:pointer;position:relative}
+table.g td.c{position:relative}
+#tblP td.c{cursor:pointer}
 table.g td.c .tag{min-width:22px;padding:2px 3px}
 table.g td.c.err{box-shadow:inset 0 0 0 2px var(--bad)}
 table.g td.c.warn{box-shadow:inset 0 0 0 2px var(--warn)}
@@ -155,9 +156,8 @@ table.g td.okc{color:var(--ok)} table.g td.badc{color:var(--bad)}
     </div>
 
     <div id="tGrafik" hidden>
-      <p class="note">Kliknij pole, aby ustawić zmianę. Kropka = pracownik ma w tym dniu prośbę, która różni się od grafiku. Czerwona ramka = Noc → Dzień/K, pomarańczowa = ponad 5 dni pracy z rzędu.</p>
+      <p class="note">Grafik edytujesz w arkuszu Google – tutaj jest jego kopia (odświeżana co ok. 5 min). Kropka = pracownik ma w tym dniu prośbę, która różni się od grafiku (najedź, aby zobaczyć). Czerwona ramka = Noc → Dzień/K, pomarańczowa = ponad 5 dni pracy z rzędu.</p>
       <div class="bar">
-        <button class="btn small" id="bCopy">Wstaw prośby w puste pola</button>
         <button class="btn small" id="bCsvG">Pobierz grafik (CSV)</button>
       </div>
       <div class="tblwrap"><table class="g" id="tblG"></table></div>
@@ -438,31 +438,8 @@ function renderGrafik(){
   }
   const pad7 = `<td colspan="7"></td></tr>`;
   $("tblG").innerHTML = h + rD + pad7 + rN + pad7 + rE + pad7 + "</tbody>";
-  $("tblG").querySelectorAll("td.c").forEach(td => td.onclick = () => {
-    const e=+td.dataset.e, day=td.dataset.day, p=S.prosby.get(key(e,day));
-    openSheet({
-      title: S.emps.find(x=>x.id===e).nazwisko + " – " + fmtDay(day),
-      sub: p ? `Prośba: ${p.wartosc||"—"}${p.komentarz?" · „"+p.komentarz+"”":""}` : "Brak prośby",
-      value: G.get(key(e,day)), comment:false,
-      save: async v => {
-        const r = v ? await sb.from("grafik").upsert({ pracownik_id:e, dzien:day, wartosc:v })
-                    : await sb.from("grafik").delete().eq("pracownik_id",e).eq("dzien",day);
-        if (r.error) return toast("Błąd: " + r.error.message);
-        load();
-      }
-    });
-  });
 }
 
-$("bCopy").onclick = async () => {
-  const rows = [];
-  for (const p of S.prosby.values()) if (p.wartosc && !S.grafik.has(key(p.pracownik_id,p.dzien))) rows.push({ pracownik_id:p.pracownik_id, dzien:p.dzien, wartosc:p.wartosc });
-  if (!rows.length) return toast("Brak próśb do wstawienia – puste pola z prośbami już uzupełnione");
-  if (!confirm(`Wstawić ${rows.length} próśb do pustych pól grafiku? Istniejące wpisy nie zostaną zmienione.`)) return;
-  const { error } = await sb.from("grafik").upsert(rows);
-  if (error) return toast("Błąd: " + error.message);
-  toast(`Wstawiono ${rows.length} wpisów`); load();
-};
 
 function csv(rows, name){
   const txt = "﻿" + rows.map(r => r.map(c => `"${String(c??"").replace(/"/g,'""')}"`).join(";")).join("\r\n");
